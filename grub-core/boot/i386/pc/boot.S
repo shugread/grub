@@ -229,23 +229,28 @@ boot_drive_check:
 	/*
 	 * ljmp to the next instruction because some bogus BIOSes
 	 * jump to 07C0:0000 instead of 0000:7C00.
+   * 将CS设置为0x00, IP保存完整代码位置
 	 */
 	ljmp	$0, $real_start
 
 real_start:
 
 	/* set up %ds and %ss as offset from 0 */
+  /* 将%ds和%ss设置为0 */
 	xorw	%ax, %ax
 	movw	%ax, %ds
 	movw	%ax, %ss
 
 	/* set up the REAL stack */
+  /* 设置栈 */
 	movw	$GRUB_BOOT_MACHINE_STACK_SEG, %sp
 
+  /* 开启中断 */
 	sti		/* we're safe again */
 
 	/*
 	 *  Check if we have a forced disk reference here
+   *  检查此处是否有强制磁盘引用 
 	 */
 	movb   boot_drive, %al
 	cmpb	$0xff, %al
@@ -253,15 +258,26 @@ real_start:
 	movb	%al, %dl
 1:
 	/* save drive reference first thing! */
+  /* 保存%dx */
 	pushw	%dx
 
 	/* print a notification message on the screen */
+  /* 调用MSG打印字符串 */
 	MSG(notification_string)
 
 	/* set %si to the disk address packet */
 	movw	$disk_address_packet, %si
 
 	/* check if LBA is supported */
+  /*
+  * 扩展 Int13H 调用中规定了两个主要的 API 子集
+  * 第一个子集提供了访问大硬盘所必须的功能, 包括 检查扩展 In13H 是否存在( 41h ), 扩展读( 42h ), 扩展写( 43h ), 校验扇区( 44h ), 扩展定位( 47h ) 和 取得驱动器参数 ( 48h ).
+  * 第二个子集提供了对软件控制驱动器锁定和弹出的支持, 包括 检查扩展 Int13H 是否存在( 41h ), 锁定/解锁驱动器( 45h ), 弹出驱动器( 46h ), 取得驱动器参数( 48h ), 取得扩展驱动器改变状态( 4Arrayh ), 
+  * int 15h。 如果使用了调用规范中不支持的功能 , BIOS 将返回： 错误码 ah = 01h ；CF = 1。
+  */
+  /* 检查是否支持LBA, 如果支持LBA, CF标志为0, bx为0x55aa, 如果不支持CF标志为1 */
+  /*  %cx 的 0 位表示是否支持第一个子集, 1位表示是否 支持第二个子集 */
+
 	movb	$0x41, %ah
 	movw	$0x55aa, %bx
 	int	$0x13
@@ -274,34 +290,49 @@ real_start:
 	pushw	%dx
 
 	/* use CHS if fails */
+  /* 不支持LBA, 使用CHS */
 	jc	LOCAL(chs_mode)
 	cmpw	$0xaa55, %bx
 	jne	LOCAL(chs_mode)
 
+  /* 检查是否支持INT 13H第一个API子集, 不支持将使用CHS模式 */
 	andw	$1, %cx
 	jz	LOCAL(chs_mode)
 
+  /*
+  * LBA 是一种逻辑寻址方式，较新型的硬盘和操作系统都使用 LBA 进行寻址。
+  * LBA 使用一个简单的逻辑块编号来表示硬盘上的每一个扇区，不再考虑物理的柱面、磁头和扇区的具体位置。
+  *
+  * Logical Block Address (逻辑块地址): 每个扇区的编号从 0 开始，LBA 只是通过一个单一的数字来标识硬盘上的扇区，无需考虑 CHS 的复杂结构。
+  */
 LOCAL(lba_mode):
+  /* 通过%si设置disk_address_packet */
+  /* 内存缓冲区的偏移量设置为0 */
 	xorw	%ax, %ax
 	movw	%ax, 4(%si)
 
 	incw	%ax
 	/* set the mode to non-zero */
+  /* 表示是lba模式读取的数据 */
 	movb	%al, -1(%si)
 
 	/* the blocks */
+  /* 设置读取的扇区数 */
 	movw	%ax, 2(%si)
 
 	/* the size and the reserved byte */
+  /* 设置DAP的大小 */
 	movw	$0x0010, (%si)
 
 	/* the absolute address */
+  /* 从第一个扇区开始读取,第0个扇区就是当前执行的代码，已经被bios读取带内存了 */
 	movl	LOCAL(kernel_sector), %ebx
 	movl	%ebx, 8(%si)
 	movl	LOCAL(kernel_sector_high), %ebx
 	movl	%ebx, 12(%si)
 
 	/* the segment of buffer address */
+  /* 读取到0x7000 << 4 ,段地址 */
 	movw	$GRUB_BOOT_MACHINE_BUFFER_SEG, 6(%si)
 
 /*
@@ -313,6 +344,19 @@ LOCAL(lba_mode):
  *			%al = 0x0 on success; err code on failure
  */
 
+  /*
+   * 通过INT 13H 功能号42H 从磁盘读取数据
+   * %ah = 0x42 功能号
+   * %dl = 驱动器索引, 0x80表示第一个硬盘
+   * %ds:%si = 磁盘地址包(DAP)的内存地址
+   * DAP的结构：
+   *  0: DAP 的大小
+   *  1: 未使用的字节，设置为0x00
+   *  2-3：要读取的扇区数
+   *  4-7：指向要传输扇区的内存缓冲区的偏移量指针(4-5: 偏移, 6-7: 段地址)
+   *  8-f：使用逻辑块寻址要读取的扇区起始位置的绝对编号
+   */
+
 	movb	$0x42, %ah
 	int	$0x13
 
@@ -322,31 +366,57 @@ LOCAL(lba_mode):
 	movw	$GRUB_BOOT_MACHINE_BUFFER_SEG, %bx
 	jmp	LOCAL(copy_buffer)
 
+  /*
+  * CHS 是传统的硬盘寻址方式，在早期硬盘中使用广泛，直到较大的硬盘引入了 LBA 模式。
+  *
+  * Cylinder (Cylindrical，柱面): 磁盘的物理结构将磁头的活动视为在一个垂直轴上移动，称为柱面。磁盘分为多个柱面，每个柱面有若干个扇区。
+  * Head (磁头): 每个磁盘有多个磁头，每个磁头用于读取或写入特定的柱面。
+  * Sector (扇区): 磁盘被分为多个扇区，每个扇区通常是 512 字节，表示最小的数据存储单位。
+  */
+
 LOCAL(chs_mode):
 	/*
 	 *  Determine the hard disk geometry from the BIOS!
 	 *  We do this first, so that LS-120 IDE floppies work correctly.
 	 */
+  /* 读取驱动器参数, 如果CF=1表示有错误 */
+  /* INT 13H 功能号8的返回值
+  * CF: 错误标识0表示没有错误
+  * AH: 状态 (07h)
+  * BL: 驱动器类型(仅限 AT/PS2 软盘)
+  * CH: 最大柱面号的低八位
+  * CL: 最大扇区号(位 5-0),最大柱面号的高两位（位 7-6）
+  * DH: 最大磁头数
+  * DL: 磁盘数量
+  * ES:DI -> 驱动器参数表(仅限软盘)
+  */
 	movb	$8, %ah
 	int	$0x13
+  /* 没有错误跳转到final_init */
 	jnc	LOCAL(final_init)
 
+  /* 恢复%dx */
 	popw	%dx
 	/*
 	 *  The call failed, so maybe use the floppy probe instead.
 	 */
+  /* 相等? 永远不会跳转到floppy_probe */
 	testb	%dl, %dl
 	jnb	LOCAL(floppy_probe)
 
 	/* Nope, we definitely have a hard disk, and we're screwed. */
+  /* 打印错误信息到屏幕 */
 	ERR(hd_probe_error_string)
 
 LOCAL(final_init):
 	/* set the mode to zero */
+  /* %dh是最大头数 */
 	movzbl	%dh, %eax
+  /* mode设置为0, 表示使用chs模式 */
 	movb	%ah, -1(%si)
 
 	/* save number of heads */
+  /* 磁头加1 */
 	incw	%ax
 	movl	%eax, 4(%si)
 
@@ -356,6 +426,7 @@ LOCAL(final_init):
 	movb	%dh, %ah
 
 	/* save number of cylinders */
+  /* 设置柱面 */
 	incw	%ax
 	movw	%ax, 8(%si)
 
@@ -363,6 +434,7 @@ LOCAL(final_init):
 	shrb	$2, %al
 
 	/* save number of sectors */
+  /* 设置扇区 */
 	movl	%eax, (%si)
 
 setup_sectors:
@@ -376,6 +448,7 @@ setup_sectors:
 	movl	LOCAL(kernel_sector), %eax
 
 	/* zero %edx */
+  /* 清空%edx */
 	xorl	%edx, %edx
 
 	/* divide by number of sectors */
@@ -424,15 +497,31 @@ setup_sectors:
  *			%al = 0x0 on success; err code on failure
  */
 
+ /*
+  * INT 0x13 功能号 0x2 读取数据到内存
+  * 功能号 %ah = 0x2
+  *     %al = 读取扇区数
+  *			%ch = 柱面
+  *			%cl = 扇区
+  *			%dh = 磁头
+  *			%dl = 磁盘 (0x80 硬盘, 0x0 软盘)
+  *			%es:%bx = 数据读取到的位置
+  *	返回值:
+  *			%al = 0表示成功
+  */
+  /* 设置段寄存器 */
 	movw	$GRUB_BOOT_MACHINE_BUFFER_SEG, %bx
 	movw	%bx, %es	/* load %es segment with disk buffer */
 
+  /* 清空 %bx */
 	xorw	%bx, %bx	/* %bx = 0, put it at 0 in the segment */
+  /* 设置功能号0x2, 读取的扇区数量是1 */
 	movw	$0x0201, %ax	/* function 2 */
 	int	$0x13
 
 	jc	LOCAL(read_error)
 
+  /* 设置读取到的buffer段寄存器 */
 	movw	%es, %bx
 
 LOCAL(copy_buffer):
@@ -440,6 +529,7 @@ LOCAL(copy_buffer):
 	 * We need to save %cx and %si because the startup code in
 	 * kernel uses them without initializing them.
 	 */
+  /* 保存寄存器 */
 	pusha
 	pushw	%ds
 
@@ -449,8 +539,11 @@ LOCAL(copy_buffer):
 	movw	$GRUB_BOOT_MACHINE_KERNEL_ADDR, %di
 	movw	%si, %es
 
+  /* 清除方向标志 */
 	cld
 
+  /* 移动数据%ds << 4 + si -->  %es << 4 + %di */
+  /*  0x70000 --> 0x8000 */
 	rep
 	movsw
 
@@ -458,6 +551,7 @@ LOCAL(copy_buffer):
 	popa
 
 	/* boot kernel */
+  /* 跳转到0x8000位置,编译的diskboot.img文件 */
 	jmp	*(LOCAL(kernel_address))
 
 /* END OF MAIN LOOP */
@@ -501,13 +595,22 @@ general_error_string:	.asciz " Error\r\n"
 	 *	%ah = 0xe	%al = character
 	 *	%bh = page	%bl = foreground color (graphics modes)
 	 */
+  /*
+  * 使用 int 10H的bios中断打印字符
+  * %ah = 0xe
+  * %al = 打印的字符
+  * %bh = 打印的页码
+  * %bl = 背景颜色
+  */
 1:
 	movw	$0x0001, %bx
 	movb	$0xe, %ah
 	int	$0x10		/* display a byte */
 LOCAL(message):
+  /* 从DS:SI加载一个字节到%al, 根据标志寄存器中的方向标志（DF，Direction Flag）更新 SI */
 	lodsb
 	cmpb	$0, %al
+  /* 如果没有读取到0x00就一直循环 */
 	jne	1b	/* if not end of string, jmp to display */
 	ret
 
