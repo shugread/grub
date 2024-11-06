@@ -384,9 +384,9 @@ LOCAL(chs_mode):
   * CF: 错误标识0表示没有错误
   * AH: 状态 (07h)
   * BL: 驱动器类型(仅限 AT/PS2 软盘)
-  * CH: 最大柱面号的低八位
-  * CL: 最大扇区号(位 5-0),最大柱面号的高两位（位 7-6）
-  * DH: 最大磁头数
+  * CH: 最大柱面号的低八位(柱面是从0开始计算的)
+  * CL: 单个磁道的扇区号(位 5-0, 扇区数是从1开始计算的),最大柱面号的高两位（位 7-6）
+  * DH: 最大磁头数-1(磁头数是从0开始计算)
   * DL: 磁盘数量
   * ES:DI -> 驱动器参数表(仅限软盘)
   */
@@ -416,7 +416,7 @@ LOCAL(final_init):
 	movb	%ah, -1(%si)
 
 	/* save number of heads */
-  /* 磁头加1 */
+  /* 磁头加1，磁头是从0开始的 */
 	incw	%ax
 	movl	%eax, 4(%si)
 
@@ -424,12 +424,14 @@ LOCAL(final_init):
 	shlw	$2, %dx
 	movb	%ch, %al
 	movb	%dh, %ah
+  /* 将%cl的6-7位作为高位，%ch作为低位，得到柱面数 */
 
 	/* save number of cylinders */
-  /* 设置柱面 */
+  /* 柱面数量是从0开始计算的，真实数量要+1 */
 	incw	%ax
 	movw	%ax, 8(%si)
 
+  /* 获取扇区数量 */
 	movzbw	%dl, %ax
 	shrb	$2, %al
 
@@ -439,12 +441,20 @@ LOCAL(final_init):
 
 setup_sectors:
 	/* load logical sector start (top half) */
+  /* 测试kernel_sector_high必须为0 */
 	movl	LOCAL(kernel_sector_high), %eax
 
 	orl	%eax, %eax
 	jnz	LOCAL(geometry_error)
 
 	/* load logical sector start (bottom half) */
+  /* 加载逻辑扇区 */
+  /*
+  * 逻辑扇区到CHS的转换
+  * 柱面 = 逻辑扇区/(磁头总数*单个磁道的扇区数)
+  * 磁头 = 逻辑扇区/单个磁道的扇区数 % 磁头总数
+  * 扇区 = 逻辑扇区 % 单个磁道的扇区数 + 1
+  * */
 	movl	LOCAL(kernel_sector), %eax
 
 	/* zero %edx */
@@ -452,33 +462,46 @@ setup_sectors:
 	xorl	%edx, %edx
 
 	/* divide by number of sectors */
+  /*
+   * %edx:%eax 作为被除数
+   * (%si)地址处的扇区数作为除数
+   * 商放在%eax, 余数放在%edx
+   */
 	divl	(%si)
 
 	/* save sector start */
+  /* 扇区数量 */
 	movb	%dl, %cl
 
 	xorw	%dx, %dx	/* zero %edx */
+  /* 用上次的商再除磁头的数量，得到柱面的数量 */
 	divl	4(%si)		/* divide by number of heads */
 
 	/* do we need too many cylinders? */
+  /* 柱面数量不能大于柱面的总数 */
 	cmpw	8(%si), %ax
 	jge	LOCAL(geometry_error)
 
 	/* normalize sector start (1-based) */
+  /* 扇区从1开始编号，需要+1 */
 	incb	%cl
 
 	/* low bits of cylinder start */
+  /* 设置柱面 */
 	movb	%al, %ch
 
 	/* high bits of cylinder start */
+  /* 设置扇区数, %cl的6-7位是柱面的高位 */
 	xorb	%al, %al
 	shrw	$2, %ax
 	orb	%al, %cl
 
 	/* save head start */
+  /* 设置磁头参数 */
 	movb	%dl, %al
 
 	/* restore %dl */
+  /* 恢复%dl */
 	popw	%dx
 
 	/* head start */
@@ -502,14 +525,14 @@ setup_sectors:
   * 功能号 %ah = 0x2
   *     %al = 读取扇区数
   *			%ch = 柱面
-  *			%cl = 扇区
+  *			%cl = 扇区（6-7位是柱面的高位）
   *			%dh = 磁头
   *			%dl = 磁盘 (0x80 硬盘, 0x0 软盘)
   *			%es:%bx = 数据读取到的位置
   *	返回值:
   *			%al = 0表示成功
   */
-  /* 设置段寄存器 */
+  /* 设置数据保持的位置 */
 	movw	$GRUB_BOOT_MACHINE_BUFFER_SEG, %bx
 	movw	%bx, %es	/* load %es segment with disk buffer */
 
