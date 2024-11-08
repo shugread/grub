@@ -48,9 +48,11 @@ _start:
 	 */
 
 	/* save drive reference first thing! */
+  /* 保存%dl的设备号 */
 	pushw	%dx
 
 	/* print a notification message on the screen */
+  /* 保存好%si, %si保存硬盘读取相关的数据 */
 	pushw	%si
 	MSG(notification_string)
 	popw	%si
@@ -59,33 +61,40 @@ _start:
 	movw	$LOCAL(firstlist), %di
 
 	/* save the sector number of the second sector in %ebp */
+  /* 保存第二个扇区的扇区号 */
 	movl	(%di), %ebp
 
         /* this is the loop for reading the rest of the kernel in */
 LOCAL(bootloop):
 
 	/* check the number of sectors to read */
+  /* 检查要读取的扇区数 */
 	cmpw	$0, 8(%di)
 
 	/* if zero, go to the start function */
+  /* 读取完成，调整到bootit */
 	je	LOCAL(bootit)
 
 LOCAL(setup_sectors):
 	/* check if we use LBA or CHS */
+  /* 判断磁盘读取模式是LBA还是CHS */
 	cmpb	$0, -1(%si)
 
 	/* use CHS if zero, LBA otherwise */
 	je	LOCAL(chs_mode)
 
 	/* load logical sector start */
+  /* 加载起始的逻辑扇区号 */
 	movl	(%di), %ebx
 	movl	4(%di), %ecx
 
 	/* the maximum is limited to 0x7f because of Phoenix EDD */
+  /* 加载的扇区数, Phoenix的限制最大0x7f */
 	xorl	%eax, %eax
 	movb	$0x7f, %al
 
 	/* how many do we really want to read? */
+  /* 检查最大读取的扇区数 */
 	cmpw	%ax, 8(%di)	/* compare against total number of sectors */
 
 	/* which is greater? */
@@ -96,31 +105,39 @@ LOCAL(setup_sectors):
 
 1:
 	/* subtract from total */
+  /* 减去读取的扇区数 */
 	subw	%ax, 8(%di)
 
 	/* add into logical sector start */
+  /* 增加读取扇区数+扇区的起始位置 */
 	addl	%eax, (%di)
 	adcl	$0, 4(%di)
 
 	/* set up disk address packet */
 
 	/* the size and the reserved byte */
+  /* 设置DAP的大小 */
 	movw	$0x0010, (%si)
 
 	/* the number of sectors */
+  /* 设置要读取的扇区数 */
 	movw	%ax, 2(%si)
 
 	/* the absolute address */
+  /* 设置读取的逻辑扇区开始的位置 */
 	movl	%ebx, 8(%si)
 	movl	%ecx, 12(%si)
 
 	/* the segment of buffer address */
+  /* 读取到的段位置 */
 	movw	$GRUB_BOOT_MACHINE_BUFFER_SEG, 6(%si)
 
 	/* save %ax from destruction! */
+  /* 保存读取的扇区数 */
 	pushw	%ax
 
 	/* the offset of buffer address */
+  /* 清空目标地址 */
 	movw	$0, 4(%si)
 
 /*
@@ -132,21 +149,25 @@ LOCAL(setup_sectors):
  *			%al = 0x0 on success; err code on failure
  */
 
+  /* 读取数据 */
 	movb	$0x42, %ah
 	int	$0x13
 
 	jc	LOCAL(read_error)
 
+  /* 设置读取到的目标段 */
 	movw	$GRUB_BOOT_MACHINE_BUFFER_SEG, %bx
 	jmp	LOCAL(copy_buffer)
 
 LOCAL(chs_mode):
 	/* load logical sector start (top half) */
+  /* CHS逻辑地址的高位必须是0, 读取不到高位地址 */
 	movl	4(%di), %eax
 	orl	%eax, %eax
 	jnz	LOCAL(geometry_error)
 
 	/* load logical sector start (bottom half) */
+  /* 加载要加载的起始逻辑地址 */
 	movl	(%di), %eax
 
 	/* zero %edx */
@@ -156,28 +177,35 @@ LOCAL(chs_mode):
 	divl	(%si)
 
 	/* save sector start */
+  /* 扇区开始 */
 	movb	%dl, 10(%si)
 
 	xorl	%edx, %edx	/* zero %edx */
 	divl	4(%si)		/* divide by number of heads */
 
 	/* save head start */
+  /* 保存磁头 */
 	movb	%dl, 11(%si)
 
 	/* save cylinder start */
+  /* 保存柱面 */
 	movw	%ax, 12(%si)
 
 	/* do we need too many cylinders? */
+  /* 不能超过最大的柱面 */
 	cmpw	8(%si), %ax
 	jge	LOCAL(geometry_error)
 
 	/* determine the maximum sector length of this read */
+  /* 扇区的开始位置 */
 	movw	(%si), %ax	/* get number of sectors per track/head */
 
 	/* subtract sector start */
+  /* 减去开始扇区 */
 	subb	10(%si), %al
 
 	/* how many do we really want to read? */
+  /* 调整扇区 */
 	cmpw	%ax, 8(%di)	/* compare against total number of sectors */
 
 
@@ -189,9 +217,11 @@ LOCAL(chs_mode):
 
 2:
 	/* subtract from total */
+  /* 减去读取扇区数量*/
 	subw	%ax, 8(%di)
 
 	/* add into logical sector start */
+  /* 增大起始扇区 */
 	addl	%eax, (%di)
 	adcl	$0, 4(%di)
 
@@ -200,6 +230,7 @@ LOCAL(chs_mode):
  */
 
 	/* get high bits of cylinder */
+  /* 加载柱面 */
 	movb	13(%si), %dl
 
 	shlb	$6, %dl		/* shift left by 6 bits */
@@ -247,13 +278,16 @@ LOCAL(chs_mode):
 LOCAL(copy_buffer):
 
 	/* load addresses for copy from disk buffer to destination */
+  /* 加载目的段0x820 */
 	movw	10(%di), %es	/* load destination segment */
 
 	/* restore %ax */
+  /* 获取读取的扇区数 */
 	popw	%ax
 
 	/* determine the next possible destination address (presuming
 		512 byte sectors!) */
+  /* 增加目的段的段地址 */
 	shlw	$5, %ax		/* shift %ax five bits to the left */
 	addw	%ax, 10(%di)	/* add the corrected value to the destination
 				   address for next time */
@@ -263,6 +297,7 @@ LOCAL(copy_buffer):
 	pushw	%ds
 
 	/* get the copy length */
+  /* 获取复制的长度 */
 	shlw	$3, %ax
 	movw	%ax, %cx
 
