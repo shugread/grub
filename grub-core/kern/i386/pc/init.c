@@ -1,6 +1,7 @@
 /*
  *  GRUB  --  GRand Unified Bootloader
- *  Copyright (C) 2002,2003,2004,2005,2006,2007,2008,2009,2010  Free Software Foundation, Inc.
+ *  Copyright (C) 2002,2003,2004,2005,2006,2007,2008,2009,2010  Free Software
+ * Foundation, Inc.
  *
  *  GRUB is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,58 +17,53 @@
  *  along with GRUB.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <grub/kernel.h>
-#include <grub/mm.h>
-#include <grub/machine/boot.h>
-#include <grub/i386/floppy.h>
-#include <grub/machine/memory.h>
-#include <grub/machine/console.h>
-#include <grub/machine/kernel.h>
-#include <grub/machine/int.h>
-#include <grub/types.h>
-#include <grub/err.h>
-#include <grub/dl.h>
-#include <grub/misc.h>
-#include <grub/loader.h>
-#include <grub/env.h>
 #include <grub/cache.h>
-#include <grub/time.h>
 #include <grub/cpu/cpuid.h>
 #include <grub/cpu/tsc.h>
+#include <grub/dl.h>
+#include <grub/env.h>
+#include <grub/err.h>
+#include <grub/i386/floppy.h>
+#include <grub/kernel.h>
+#include <grub/loader.h>
+#include <grub/machine/boot.h>
+#include <grub/machine/console.h>
+#include <grub/machine/int.h>
+#include <grub/machine/kernel.h>
+#include <grub/machine/memory.h>
 #include <grub/machine/time.h>
+#include <grub/misc.h>
+#include <grub/mm.h>
+#include <grub/time.h>
+#include <grub/types.h>
 
-struct mem_region
-{
+struct mem_region {
   grub_addr_t addr;
   grub_size_t size;
 };
 
-#define MAX_REGIONS	32
+#define MAX_REGIONS 32
 
 static struct mem_region mem_regions[MAX_REGIONS];
 static int num_regions;
 
-void (*grub_pc_net_config) (char **device, char **path);
+void (*grub_pc_net_config)(char **device, char **path);
 
 /*
  *	return the real time in ticks, of which there are about
  *	18-20 per second
  */
-grub_uint64_t
-grub_rtc_get_time_ms (void)
-{
+grub_uint64_t grub_rtc_get_time_ms(void) {
   struct grub_bios_int_registers regs;
 
   regs.eax = 0;
   regs.flags = GRUB_CPU_INT_FLAGS_DEFAULT;
-  grub_bios_interrupt (0x1a, &regs);
+  grub_bios_interrupt(0x1a, &regs);
 
   return ((regs.ecx << 16) | (regs.edx & 0xffff)) * 55ULL;
 }
 
-void
-grub_machine_get_bootlocation (char **device, char **path)
-{
+void grub_machine_get_bootlocation(char **device, char **path) {
   char *ptr;
   grub_uint8_t boot_drive, dos_part, bsd_part;
 
@@ -77,38 +73,32 @@ grub_machine_get_bootlocation (char **device, char **path)
 
   /* No hardcoded root partition - make it from the boot drive and the
      partition number encoded at the install time.  */
-  if (boot_drive == GRUB_BOOT_MACHINE_PXE_DL)
-    {
-      if (grub_pc_net_config)
-	grub_pc_net_config (device, path);
-      return;
-    }
+  if (boot_drive == GRUB_BOOT_MACHINE_PXE_DL) {
+    if (grub_pc_net_config)
+      grub_pc_net_config(device, path);
+    return;
+  }
 
   /* XXX: This should be enough.  */
 #define DEV_SIZE 100
-  *device = grub_malloc (DEV_SIZE);
+  *device = grub_malloc(DEV_SIZE);
   ptr = *device;
-  grub_snprintf (*device, DEV_SIZE,
-		 "%cd%u", (boot_drive & 0x80) ? 'h' : 'f',
-		 boot_drive & 0x7f);
-  ptr += grub_strlen (ptr);
+  grub_snprintf(*device, DEV_SIZE, "%cd%u", (boot_drive & 0x80) ? 'h' : 'f',
+                boot_drive & 0x7f);
+  ptr += grub_strlen(ptr);
 
   if (dos_part != 0xff)
-    grub_snprintf (ptr, DEV_SIZE - (ptr - *device),
-		   ",%u", dos_part + 1);
-  ptr += grub_strlen (ptr);
+    grub_snprintf(ptr, DEV_SIZE - (ptr - *device), ",%u", dos_part + 1);
+  ptr += grub_strlen(ptr);
 
   if (bsd_part != 0xff)
-    grub_snprintf (ptr, DEV_SIZE - (ptr - *device), ",%u",
-		   bsd_part + 1);
-  ptr += grub_strlen (ptr);
+    grub_snprintf(ptr, DEV_SIZE - (ptr - *device), ",%u", bsd_part + 1);
+  ptr += grub_strlen(ptr);
   *ptr = 0;
 }
 
 /* Add a memory region.  */
-static void
-add_mem_region (grub_addr_t addr, grub_size_t size)
-{
+static void add_mem_region(grub_addr_t addr, grub_size_t size) {
   if (num_regions == MAX_REGIONS)
     /* Ignore.  */
     return;
@@ -119,68 +109,58 @@ add_mem_region (grub_addr_t addr, grub_size_t size)
 }
 
 /* Compact memory regions.  */
-static void
-compact_mem_regions (void)
-{
+static void compact_mem_regions(void) {
   int i, j;
 
   /* Sort them.  */
   for (i = 0; i < num_regions - 1; i++)
     for (j = i + 1; j < num_regions; j++)
-      if (mem_regions[i].addr > mem_regions[j].addr)
-	{
-	  struct mem_region tmp = mem_regions[i];
-	  mem_regions[i] = mem_regions[j];
-	  mem_regions[j] = tmp;
-	}
+      if (mem_regions[i].addr > mem_regions[j].addr) {
+        struct mem_region tmp = mem_regions[i];
+        mem_regions[i] = mem_regions[j];
+        mem_regions[j] = tmp;
+      }
 
   /* Merge overlaps.  */
   for (i = 0; i < num_regions - 1; i++)
-    if (mem_regions[i].addr + mem_regions[i].size >= mem_regions[i + 1].addr)
-      {
-	j = i + 1;
+    if (mem_regions[i].addr + mem_regions[i].size >= mem_regions[i + 1].addr) {
+      j = i + 1;
 
-	if (mem_regions[i].addr + mem_regions[i].size
-	    < mem_regions[j].addr + mem_regions[j].size)
-	  mem_regions[i].size = (mem_regions[j].addr + mem_regions[j].size
-				 - mem_regions[i].addr);
+      if (mem_regions[i].addr + mem_regions[i].size <
+          mem_regions[j].addr + mem_regions[j].size)
+        mem_regions[i].size =
+            (mem_regions[j].addr + mem_regions[j].size - mem_regions[i].addr);
 
-	grub_memmove (mem_regions + j, mem_regions + j + 1,
-		      (num_regions - j - 1) * sizeof (struct mem_region));
-	i--;
-        num_regions--;
-      }
+      grub_memmove(mem_regions + j, mem_regions + j + 1,
+                   (num_regions - j - 1) * sizeof(struct mem_region));
+      i--;
+      num_regions--;
+    }
 }
 
 grub_addr_t grub_modbase;
 extern grub_uint8_t _start[], _edata[];
 
 /* Helper for grub_machine_init.  */
-static int
-mmap_iterate_hook (grub_uint64_t addr, grub_uint64_t size,
-		   grub_memory_type_t type,
-		   void *data __attribute__ ((unused)))
-{
+static int mmap_iterate_hook(grub_uint64_t addr, grub_uint64_t size,
+                             grub_memory_type_t type,
+                             void *data __attribute__((unused))) {
   /* Avoid the lower memory.  */
-  if (addr < GRUB_MEMORY_MACHINE_UPPER_START)
-    {
-      if (size <= GRUB_MEMORY_MACHINE_UPPER_START - addr)
-	return 0;
+  if (addr < GRUB_MEMORY_MACHINE_UPPER_START) {
+    if (size <= GRUB_MEMORY_MACHINE_UPPER_START - addr)
+      return 0;
 
-      size -= GRUB_MEMORY_MACHINE_UPPER_START - addr;
-      addr = GRUB_MEMORY_MACHINE_UPPER_START;
-    }
+    size -= GRUB_MEMORY_MACHINE_UPPER_START - addr;
+    addr = GRUB_MEMORY_MACHINE_UPPER_START;
+  }
 
   /* Ignore >4GB.  */
-  if (addr <= 0xFFFFFFFF && type == GRUB_MEMORY_AVAILABLE)
-    {
-      grub_size_t len;
+  if (addr <= 0xFFFFFFFF && type == GRUB_MEMORY_AVAILABLE) {
+    grub_size_t len;
 
-      len = (grub_size_t) ((addr + size > 0xFFFFFFFF)
-	     ? 0xFFFFFFFF - addr
-	     : size);
-      add_mem_region (addr, len);
-    }
+    len = (grub_size_t)((addr + size > 0xFFFFFFFF) ? 0xFFFFFFFF - addr : size);
+    add_mem_region(addr, len);
+  }
 
   return 0;
 }
@@ -188,35 +168,30 @@ mmap_iterate_hook (grub_uint64_t addr, grub_uint64_t size,
 extern grub_uint16_t grub_bios_via_workaround1, grub_bios_via_workaround2;
 
 /* Via needs additional wbinvd.  */
-static void
-grub_via_workaround_init (void)
-{
+static void grub_via_workaround_init(void) {
   grub_uint32_t manufacturer[3], max_cpuid, proc_info;
-  if (! grub_cpu_is_cpuid_supported ())
+  if (!grub_cpu_is_cpuid_supported())
     return;
 
-  grub_cpuid (0, max_cpuid, manufacturer[0], manufacturer[2], manufacturer[1]);
+  grub_cpuid(0, max_cpuid, manufacturer[0], manufacturer[2], manufacturer[1]);
 
-  if (grub_memcmp (manufacturer, "CentaurHauls", 12) != 0)
+  if (grub_memcmp(manufacturer, "CentaurHauls", 12) != 0)
     return;
 
-  if (max_cpuid > 0)
-    {
-      grub_cpuid (1, proc_info, /* Don't care. */ manufacturer[0],
-                  manufacturer[2], manufacturer[1]);
-      /* Check model, apply only to VIA C3 and lower. */
-      if (((proc_info & 0xf0) >> 4 | (proc_info & 0xf0000) >> 12) > 10)
-        return;
-    }
+  if (max_cpuid > 0) {
+    grub_cpuid(1, proc_info, /* Don't care. */ manufacturer[0], manufacturer[2],
+               manufacturer[1]);
+    /* Check model, apply only to VIA C3 and lower. */
+    if (((proc_info & 0xf0) >> 4 | (proc_info & 0xf0000) >> 12) > 10)
+      return;
+  }
 
   grub_bios_via_workaround1 = 0x090f;
   grub_bios_via_workaround2 = 0x090f;
-  asm volatile ("wbinvd");
+  asm volatile("wbinvd");
 }
 
-void
-grub_machine_init (void)
-{
+void grub_machine_init(void) {
   int i;
 #if 0
   int grub_lower_mem;
@@ -224,12 +199,12 @@ grub_machine_init (void)
   grub_addr_t modend;
 
   /* This has to happen before any BIOS calls. */
-  grub_via_workaround_init ();
+  grub_via_workaround_init();
 
   grub_modbase = GRUB_MEMORY_MACHINE_DECOMPRESSION_ADDR + (_edata - _start);
 
   /* Initialize the console as early as possible.  */
-  grub_console_init ();
+  grub_console_init();
 
   /* This sanity check is useless since top of GRUB_MEMORY_MACHINE_RESERVED_END
      is used for stack and if it's unavailable we wouldn't have gotten so far.
@@ -252,29 +227,26 @@ grub_machine_init (void)
 		    grub_lower_mem - GRUB_MEMORY_MACHINE_RESERVED_END);
 #endif
 
-  grub_machine_mmap_iterate (mmap_iterate_hook, NULL);
+  grub_machine_mmap_iterate(mmap_iterate_hook, NULL);
 
-  compact_mem_regions ();
+  compact_mem_regions();
 
-  modend = grub_modules_get_end ();
-  for (i = 0; i < num_regions; i++)
-    {
-      grub_addr_t beg = mem_regions[i].addr;
-      grub_addr_t fin = mem_regions[i].addr + mem_regions[i].size;
-      if (modend && beg < modend)
-	beg = modend;
-      if (beg >= fin)
-	continue;
-      grub_mm_init_region ((void *) beg, fin - beg);
-    }
+  modend = grub_modules_get_end();
+  for (i = 0; i < num_regions; i++) {
+    grub_addr_t beg = mem_regions[i].addr;
+    grub_addr_t fin = mem_regions[i].addr + mem_regions[i].size;
+    if (modend && beg < modend)
+      beg = modend;
+    if (beg >= fin)
+      continue;
+    grub_mm_init_region((void *)beg, fin - beg);
+  }
 
-  grub_tsc_init ();
+  grub_tsc_init();
 }
 
-void
-grub_machine_fini (int flags)
-{
+void grub_machine_fini(int flags) {
   if (flags & GRUB_LOADER_FLAG_NORETURN)
-    grub_console_fini ();
-  grub_stop_floppy ();
+    grub_console_fini();
+  grub_stop_floppy();
 }

@@ -156,15 +156,18 @@ real_to_prot:
 
 	/* turn on protected mode */
 	movl	%cr0, %eax
+  /* 与0x1， 设置使CPU调整到保护模式  */
 	orl	$GRUB_MEMORY_CPU_CR0_PE_ON, %eax
 	movl	%eax, %cr0
 
 	/* jump to relocation, flush prefetch queue, and reload %cs */
+  /* 段选择子 0x8，0b10000中，0-2位表示特权等级，3位1表示LDT,0表示GDT, 4-15位表示在GDT或IDT中的索引 */
 	ljmpl	$GRUB_MEMORY_MACHINE_PROT_MODE_CSEG, $protcseg
 
 	.code32
 protcseg:
 	/* reload other segment registers */
+  /* 0x10表示索引1 */
 	movw	$GRUB_MEMORY_MACHINE_PROT_MODE_DSEG, %ax
 	movw	%ax, %ds
 	movw	%ax, %es
@@ -177,6 +180,7 @@ protcseg:
 	movl	%eax, GRUB_MEMORY_MACHINE_REAL_STACK
 
 	/* get protected mode stack */
+  /* 设置堆栈0x7fff0 */
 	movl	protstack, %eax
 	movl	%eax, %esp
 	movl	%eax, %ebp
@@ -188,6 +192,7 @@ protcseg:
 	/* zero %eax */
 	xorl	%eax, %eax
 
+  /* 保存idt */
 	sidt LOCAL(realidt)
 	lidt protidt
 

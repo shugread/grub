@@ -64,6 +64,7 @@ LOCAL(start):
 	movl	%ecx, (LOCAL(real_to_prot_addr) - _start) (%esi)
 	movl	%edi, (LOCAL(prot_to_real_addr) - _start) (%esi)
 	movl	%eax, (EXT_C(grub_realidt) - _start) (%esi)
+  /* 将代码移动到0x9000 */
 
 	/* copy back the decompressed part (except the modules) */
 #ifdef __APPLE__
@@ -95,6 +96,7 @@ LOCAL(cont):
 	movsb
 #endif
 
+  /* 清空bss段 */
 #ifdef __APPLE__
 	/* clean out the bss */
 	movl	$EXT_C(_edata), %edi
@@ -121,6 +123,7 @@ LOCAL(cont):
 	/*
 	 *  Call the start of main body of C code.
 	 */
+  /* 跳转到grub_main主函数 */
 	call EXT_C(grub_main)
 
 LOCAL(real_to_prot_addr):

@@ -83,6 +83,7 @@ LOCAL (codestart):
 	movw	%ax, %es
 
 	/* set up the real mode/BIOS stack */
+  /* 设置实模式的栈 */
 	movl	$GRUB_MEMORY_MACHINE_REAL_STACK, %ebp
 	movl	%ebp, %esp
 
@@ -94,13 +95,15 @@ LOCAL (codestart):
 	/* reset disk system (%ah = 0) */
 	int	$0x13
 
-	/* transition to protected mode */
+	/* transition to protected mode */ 
+  /* 切换到保护模式，real_to_prot在 "../../../kern/i386/realmode.S" */
 	calll	real_to_prot
 
 	/* The ".code32" directive takes GAS out of 16-bit mode. */
 	.code32
 
 	cld
+  /* 开启a20总线 */
 	call	grub_gate_a20
 
 	movl	LOCAL(compressed_size), %edx
@@ -113,6 +116,7 @@ LOCAL (codestart):
 	movl    reed_solomon_redundancy, %ecx
 	leal    LOCAL(reed_solomon_part), %eax
 	cld
+  /* grub_reed_solomon_recover在grub-core/lib/reed_solomon.c */
 	call    EXT_C (grub_reed_solomon_recover)
 	jmp	post_reed_solomon
 
@@ -155,6 +159,7 @@ gate_a20_try_bios:
 	call	prot_to_real
 
 	.code16
+  /* 通过调用 BIOS 中断 INT 15h 的功能号 2401h 来开启 A20 地址线 */
 	movw	$0x2401, %ax
 	int	$0x15
 
@@ -173,6 +178,7 @@ gate_a20_try_system_control_port_a:
 	 * this forward.
 	 */
 	/* fourth, try the system control port A */
+  /* 通过 I/O 端口 0x92 来开启 A20 地址线 */
 	inb	$0x92
 	andb	$(~0x03), %al
 	orb	$0x02, %al
@@ -198,6 +204,7 @@ gate_a20_flush_keyboard_buffer:
 
 gate_a20_try_keyboard_controller:
 	/* third, try the keyboard controller */
+  /* 使用键盘控制器开启 A20 */
 	call    gate_a20_flush_keyboard_buffer
 
 	movb	$0xd1, %al
@@ -222,11 +229,14 @@ gate_a20_try_keyboard_controller:
 	jnz	gate_a20_try_bios
 	ret
 
+  /* 通过地址环绕判断A20总线是否开启，通过0x8000和0x108000两个地址的值是否影响 */
 gate_a20_check_state:
 	/* iterate the checking for a while */
+  /* 循环100次 */
 	movl	$100, %ecx
 1:
 	call	3f
+  /* 检查%al是否为0。如果%al为0，表示A20线已开启 */
 	testb	%al, %al
 	jz	2f
 	loop	1b
@@ -237,28 +247,40 @@ gate_a20_check_state:
 	pushl	%ecx
 	xorl	%eax, %eax
 	/* compare the byte at 0x8000 with that at 0x108000 */
+  /* 0x8000 */
 	movl	$GRUB_BOOT_MACHINE_KERNEL_ADDR, %ebx
 	pushl	%ebx
 	/* save the original byte in CL */
+  /* 将内存地址0x8000处的字节值加载到寄存器%cl中 */
 	movb	(%ebx), %cl
 	/* store the value at 0x108000 in AL */
+  /* 0x108000 */
 	addl	$0x100000, %ebx
+  /* 将0x108000处的字节值加载到寄存器%al中 */
 	movb	(%ebx), %al
 	/* try to set one less value at 0x8000 */
+  /* 将%ebx的原值从栈中恢复，使其再次指向0x8000 */
 	popl	%ebx
+  /* 将%al（即0x108000处的值）拷贝到%ch中，并将%ch减1。 */
 	movb	%al, %ch
 	decb	%ch
+  /* 将修改后的值写回到0x8000 */
 	movb	%ch, (%ebx)
 	/* serialize */
+  /* 对0x80端口进行两次写操作，确保前面的写操作已完成 */
 	outb	%al, $0x80
 	outb	%al, $0x80
 	/* obtain the value at 0x108000 in CH */
 	pushl	%ebx
+  /* 使%ebx再次指向0x108000 */
 	addl	$0x100000, %ebx
+  /* 将0x108000处的新字节值加载到%ch中 */
 	movb	(%ebx), %ch
 	/* this result is 0 if A20 is on or 1 if it is off */
+  /* 将%ch中的值从%al中减去。如果%al与%ch相等，则结果为0，表示A20地址线开启；否则，结果为非零，表示A20地址线未开启 */
 	subb	%ch, %al
 	/* restore the original */
+  /* 将%ebx从栈中恢复（指向0x8000），然后将%cl中的原始值写回0x8000，以恢复其初始状态 */
 	popl	%ebx
 	movb	%cl, (%ebx)
 	popl	%ecx
@@ -343,6 +365,7 @@ post_reed_solomon:
 	leal	(%edi, %ecx), %ebx
 	/* Don't remove this push: it's an argument.  */
 	push 	%ecx
+  /* _LzmaDecodeA在lzma_decode.S中, 调用LZMA压缩算法的解压, 解压到0x100000 */
 	call	_LzmaDecodeA
 	pop	%ecx
 	/* _LzmaDecodeA clears DF, so no need to run cld */
@@ -353,6 +376,7 @@ post_reed_solomon:
 	movl	$prot_to_real, %edi
 	movl	$real_to_prot, %ecx
 	movl	$LOCAL(realidt), %eax
+  /* 跳转到grub-core/kern/i386/pc/startup.S */
 	jmp	*%esi
 
 #ifdef ENABLE_LZMA
